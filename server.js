@@ -21,7 +21,9 @@ function pickRoom() {
   for (const r of rooms.values()) if (r.players.size < ROOM_SIZE) return r;
   const r = { id: nextRoom++, players: new Map(), luck: [] }; rooms.set(r.id, r); return r;
 }
-function freeSlot(r) { const used = new Set([...r.players.values()].map((c) => c.slot)); for (let i = 0; i < ROOM_SIZE; i++) if (!used.has(i)) return i; return -1; }
+// middle pens first: they sit right behind the throw platform, so the walk to your pen is short
+const SLOT_ORDER = [2, 3, 1, 4, 0, 5];
+function freeSlot(r) { const used = new Set([...r.players.values()].map((c) => c.slot)); for (const i of SLOT_ORDER) if (!used.has(i)) return i; return -1; }
 function pub(c) { return { id: c.id, name: c.name, slot: c.slot, ...c.state }; }
 function cast(r, msg, except) { const s = JSON.stringify(msg); for (const c of r.players.values()) if (c !== except && c.ws.readyState === 1) c.ws.send(s); }
 const clean = (str, n) => String(str || '').replace(/[^\w\- .]/g, '').slice(0, n);
