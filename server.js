@@ -8,8 +8,10 @@ const PORT = process.env.PORT || 8080;
 const ROOM_SIZE = 6;
 const LUCK_TIME = 600 * 1000; // 10 min per Server Luck boost
 const MAX_LUCK = 5;
-const rooms = new Map(); // id -> { id, players: Map(id -> client), luck: [expiry] }
-let nextRoom = 1, nextId = 1;
+const rooms = new Map(); // code -> { id, priv, players: Map(id -> client), luck: [expiry] }
+let nextId = 1;
+const code = () => { let c; do c = Math.random().toString(36).slice(2, 8); while (rooms.has(c)); return c; };
+const newRoom = (priv) => { const r = { id: code(), priv, players: new Map(), luck: [] }; rooms.set(r.id, r); return r; };
 
 const server = http.createServer((req, res) => {
   if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, rooms: rooms.size, players: [...rooms.values()].reduce((s, r) => s + r.players.size, 0) })); return; }
@@ -17,9 +19,12 @@ const server = http.createServer((req, res) => {
 });
 const wss = new WebSocketServer({ server, maxPayload: 4096 });
 
-function pickRoom() {
-  for (const r of rooms.values()) if (r.players.size < ROOM_SIZE) return r;
-  const r = { id: nextRoom++, players: new Map(), luck: [] }; rooms.set(r.id, r); return r;
+// join = a friend's room code (invite / CrazyGames join), priv = start a new private room (instant multiplayer)
+function pickRoom(join, priv) {
+  if (join) { const r = rooms.get(join); if (r && r.players.size < ROOM_SIZE) return { r }; }
+  if (priv) return { r: newRoom(true) };
+  for (const r of rooms.values()) if (!r.priv && r.players.size < ROOM_SIZE) return { r, full: !!join };
+  return { r: newRoom(false), full: !!join };
 }
 // middle pens first: they sit right behind the throw platform, so the walk to your pen is short
 const SLOT_ORDER = [2, 3, 1, 4, 0, 5];
@@ -39,9 +44,9 @@ wss.on('connection', (ws) => {
     if (!m || typeof m.t !== 'string') return;
     if (m.t === 'hello' && !c.room) {
       c.name = clean(m.name, 20) || 'Guest';
-      const r = pickRoom(); c.room = r; c.slot = freeSlot(r); r.players.set(c.id, c);
+      const { r, full } = pickRoom(clean(m.room, 12), !!m.priv); c.room = r; c.slot = freeSlot(r); r.players.set(c.id, c);
       r.luck = r.luck.filter((t) => t > now);
-      ws.send(JSON.stringify({ t: 'welcome', id: c.id, slot: c.slot, room: r.id, luck: r.luck, players: [...r.players.values()].filter((p) => p !== c).map(pub) }));
+      ws.send(JSON.stringify({ t: 'welcome', id: c.id, slot: c.slot, room: r.id, priv: r.priv, size: r.players.size, max: ROOM_SIZE, roomFull: !!full, luck: r.luck, players: [...r.players.values()].filter((p) => p !== c).map(pub) }));
       cast(r, { t: 'join', p: pub(c) }, c);
       return;
     }
